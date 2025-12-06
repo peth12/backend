@@ -1,0 +1,55 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build artifacts
+*.test
+*.out
+
+# Output binaries
+/bin/
+/dist/
+/build/
+/cmd/*/main
+
+# Dependency directories (generally not needed with go mod)
+vendor/
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# IDE / Editor configs
+.vscode/
+.idea/
+*.iml
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Env files – ไม่ควร push ขึ้น repo
+.env
+.env.*
+*.env
+
+# Fiber specific – static cached files
+fiber.pid
+tmp/
+cache/
+
+# Docker-related
+docker-data/
