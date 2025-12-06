@@ -10,9 +10,47 @@ import (
 func GetDashboardStats(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(uint)
 
-	// Fetch all expenses for the user
+	// Query Parameters
+	groupID := c.QueryInt("group_id", 0)
+	memberID := c.QueryInt("member_id", 0)
+	category := c.Query("category")
+	startDate := c.Query("start_date") // YYYY-MM-DD
+	endDate := c.Query("end_date")     // YYYY-MM-DD
+
+	// Helper to find expenses
 	var expenses []models.ExpenseRequest
-	if err := database.DB.Where("requester_id = ?", userID).Find(&expenses).Error; err != nil {
+	query := database.DB.Model(&models.ExpenseRequest{})
+
+	if groupID > 0 {
+		// Group View: Check if user is a member of the group
+		var memberCount int64
+		if err := database.DB.Model(&models.GroupMember{}).Where("group_id = ? AND user_id = ?", groupID, userID).Count(&memberCount).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Error checking group membership"})
+		}
+		if memberCount == 0 {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "You are not a member of this group"})
+		}
+		query = query.Where("group_id = ?", groupID)
+
+		// Optional Member Filter (only if in group view)
+		if memberID > 0 {
+			query = query.Where("requester_id = ?", memberID)
+		}
+	} else {
+		// Personal View (Default): Only show my expenses
+		query = query.Where("requester_id = ?", userID)
+	}
+
+	// Common Filters
+	if category != "" {
+		query = query.Where("category = ?", category)
+	}
+	if startDate != "" && endDate != "" {
+		query = query.Where("created_at BETWEEN ? AND ?", startDate+" 00:00:00", endDate+" 23:59:59")
+	}
+
+	// Execute Query
+	if err := query.Find(&expenses).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not fetch stats"})
 	}
 
