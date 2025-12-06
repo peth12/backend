@@ -17,12 +17,13 @@ func CreateExpense(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(uint)
 
 	type CreateExpenseRequest struct {
-		GroupID      uint    `json:"group_id"`
-		Title        string  `json:"title"`
-		Category     string  `json:"category"`
-		Amount       float64 `json:"amount"`
-		Description  string  `json:"description"`
-		TargetUserID *uint   `json:"target_user_id"`
+		GroupID        uint    `json:"group_id"`
+		Title          string  `json:"title"`
+		Category       string  `json:"category"`
+		Amount         float64 `json:"amount"`
+		Description    string  `json:"description"`
+		TargetUserID   *uint   `json:"target_user_id"`
+		IsDirectRecord bool    `json:"is_direct_record"`
 	}
 
 	var req CreateExpenseRequest
@@ -36,6 +37,17 @@ func CreateExpense(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member of this group"})
 	}
 
+	status := "pending"
+	var approvedBy *uint
+	var approvedAt *time.Time
+
+	if req.IsDirectRecord {
+		status = "approved"
+		approvedBy = &userID
+		now := time.Now()
+		approvedAt = &now
+	}
+
 	expense := models.ExpenseRequest{
 		GroupID:      req.GroupID,
 		RequesterID:  userID,
@@ -43,8 +55,10 @@ func CreateExpense(c *fiber.Ctx) error {
 		Category:     req.Category,
 		Amount:       req.Amount,
 		Description:  req.Description,
-		Status:       "pending",
+		Status:       status,
 		TargetUserID: req.TargetUserID,
+		ApprovedBy:   approvedBy,
+		ApprovedAt:   approvedAt,
 	}
 
 	if err := database.DB.Create(&expense).Error; err != nil {
