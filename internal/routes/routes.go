@@ -10,6 +10,9 @@ import (
 func SetupRoutes(app *fiber.App) {
 	api := app.Group("/api")
 
+	// Health check endpoint (no authentication required)
+	api.Get("/health", handlers.HealthCheck)
+
 	// Auth
 	auth := api.Group("/auth")
 	auth.Post("/signup", handlers.Signup)

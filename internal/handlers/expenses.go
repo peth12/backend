@@ -71,26 +71,83 @@ func CreateExpense(c *fiber.Ctx) error {
 func ListExpenses(c *fiber.Ctx) error {
 	userID := c.Locals("user_id").(uint)
 
-	// Optional: Filter by status and group
+	// Query Parameters
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "10"))
+	offset := (page - 1) * limit
+
+	scope := c.Query("scope", "me") // me or group
+	groupID := c.QueryInt("group_id", 0)
+	memberID := c.QueryInt("member_id", 0)
 	status := c.Query("status")
-	groupID := c.Query("group_id")
+	category := c.Query("category")
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
+	search := c.Query("search")
 
-	query := database.DB.Preload("Requester").Preload("TargetUser").Where("requester_id = ?", userID)
+	query := database.DB.Model(&models.ExpenseRequest{}).
+		Preload("Requester").
+		Preload("TargetUser")
 
+	// Scope Logic
+	if scope == "group" && groupID > 0 {
+		// Verify membership
+		var memberCount int64
+		if err := database.DB.Model(&models.GroupMember{}).Where("group_id = ? AND user_id = ?", groupID, userID).Count(&memberCount).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Error checking membership"})
+		}
+		if memberCount == 0 {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member of this group"})
+		}
+		query = query.Where("group_id = ?", groupID)
+
+		// Filter by specific member in group
+		if memberID > 0 {
+			query = query.Where("requester_id = ?", memberID)
+		}
+	} else {
+		// Default to personal expenses
+		query = query.Where("requester_id = ?", userID)
+		// Can still filter by group if I only want MY expenses in a specific group
+		if groupID > 0 {
+			query = query.Where("group_id = ?", groupID)
+		}
+	}
+
+	// Common Filters
 	if status != "" && status != "all" {
 		query = query.Where("status = ?", status)
 	}
-
-	if groupID != "" && groupID != "all" {
-		query = query.Where("group_id = ?", groupID)
+	if category != "" && category != "all" {
+		query = query.Where("category = ?", category)
+	}
+	if startDate != "" && endDate != "" {
+		query = query.Where("created_at BETWEEN ? AND ?", startDate+" 00:00:00", endDate+" 23:59:59")
+	}
+	if search != "" {
+		query = query.Where("title ILIKE ? OR description ILIKE ?", "%"+search+"%", "%"+search+"%")
 	}
 
+	// Count Total
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not count expenses"})
+	}
+
+	// Fetch Data
 	expenses := make([]models.ExpenseRequest, 0)
-	if err := query.Order("created_at desc").Find(&expenses).Error; err != nil {
+	if err := query.Order("created_at desc").Limit(limit).Offset(offset).Find(&expenses).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not fetch expenses"})
 	}
 
-	return c.JSON(expenses)
+	return c.JSON(fiber.Map{
+		"data": expenses,
+		"meta": fiber.Map{
+			"total": total,
+			"page":  page,
+			"limit": limit,
+		},
+	})
 }
 
 func GetExpense(c *fiber.Ctx) error {
