@@ -24,7 +24,7 @@ func ListApprovals(c *fiber.Ctx) error {
 	}
 
 	if len(roles) == 0 {
-		fmt.Println("No roles found for user")	
+		fmt.Println("No roles found for user")
 		return c.JSON([]models.ExpenseRequest{})
 	}
 
@@ -63,8 +63,21 @@ func ApproveExpense(c *fiber.Ctx) error {
 
 	// Verify permission
 	var role models.UserRole
+	fmt.Printf("DEBUG: Approve - UserID: %d, GroupID: %d\n", userID, expense.GroupID)
 	if err := database.DB.Where("user_id = ? AND group_id = ? AND role IN ?", userID, expense.GroupID, []string{"approver", "admin"}).First(&role).Error; err != nil {
+		fmt.Printf("DEBUG: Approve - Role Check Failed: %v\n", err)
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not authorized to approve"})
+	}
+	fmt.Printf("DEBUG: Approve - Role Found: %s\n", role.Role)
+
+	// Enforce Specific Approver if set
+	if expense.TargetUserID != nil {
+		fmt.Printf("DEBUG: Approve - TargetUserID: %d, CurrentUserID: %d\n", *expense.TargetUserID, userID)
+		if *expense.TargetUserID != userID {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Only the assigned approver can approve this expense"})
+		}
+	} else {
+		fmt.Println("DEBUG: Approve - TargetUserID is nil (Anyone)")
 	}
 
 	// Handle Slip Upload if present
@@ -143,6 +156,16 @@ func RejectExpense(c *fiber.Ctx) error {
 	var role models.UserRole
 	if err := database.DB.Where("user_id = ? AND group_id = ? AND role IN ?", userID, expense.GroupID, []string{"approver", "admin"}).First(&role).Error; err != nil {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not authorized to reject"})
+	}
+
+	// Enforce Specific Approver if set
+	if expense.TargetUserID != nil {
+		fmt.Printf("DEBUG: Reject - TargetUserID: %d, CurrentUserID: %d\n", *expense.TargetUserID, userID)
+		if *expense.TargetUserID != userID {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Only the assigned approver can reject this expense"})
+		}
+	} else {
+		fmt.Println("DEBUG: Reject - TargetUserID is nil (Anyone)")
 	}
 
 	// Update Status
