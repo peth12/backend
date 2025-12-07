@@ -22,6 +22,12 @@ func SetupRoutes(app *fiber.App) {
 	auth.Post("/change-password", middleware.Protected(), handlers.ChangePassword)
 	auth.Post("/avatar", middleware.Protected(), handlers.UploadAvatar)
 
+	// Wallet
+	wallet := api.Group("/wallet", middleware.Protected())
+	wallet.Get("/", handlers.GetWallet)
+	wallet.Post("/topup", handlers.TopupWallet)
+	wallet.Get("/transactions", handlers.GetWalletTransactions)
+
 	// Groups
 	groups := api.Group("/groups", middleware.Protected())
 	groups.Get("/invite/:code", handlers.GetGroupInfoByInvite)

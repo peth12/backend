@@ -63,21 +63,27 @@ func ApproveExpense(c *fiber.Ctx) error {
 
 	// Verify permission
 	var role models.UserRole
-	fmt.Printf("DEBUG: Approve - UserID: %d, GroupID: %d\n", userID, expense.GroupID)
-	if err := database.DB.Where("user_id = ? AND group_id = ? AND role IN ?", userID, expense.GroupID, []string{"approver", "admin"}).First(&role).Error; err != nil {
-		fmt.Printf("DEBUG: Approve - Role Check Failed: %v\n", err)
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not authorized to approve"})
+	// Check if user is in the group (any role)
+	if err := database.DB.Where("user_id = ? AND group_id = ?", userID, expense.GroupID).First(&role).Error; err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member of this group"})
 	}
-	fmt.Printf("DEBUG: Approve - Role Found: %s\n", role.Role)
 
 	// Enforce Specific Approver if set
 	if expense.TargetUserID != nil {
-		fmt.Printf("DEBUG: Approve - TargetUserID: %d, CurrentUserID: %d\n", *expense.TargetUserID, userID)
 		if *expense.TargetUserID != userID {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Only the assigned approver can approve this expense"})
 		}
 	} else {
-		fmt.Println("DEBUG: Approve - TargetUserID is nil (Anyone)")
+		// If no specific approver, anyone in the group can approve.
+		// Optional: Block requester from approving their own request?
+		// The requirement didn't specify blocking self-approval, but it's good practice.
+		// However, "everyone in the group" might literally mean everyone.
+		// I will keep self-approval allowed for now if they are not the target, or maybe block it?
+		// Let's block self-approval unless they assigned it to themselves (which is separate logic).
+		if expense.RequesterID == userID {
+			// For now, allow it to be safe with "everyone", or blocking it might confuse if they are testing alone.
+			// User prompt: "everyone within the group can approve".
+		}
 	}
 
 	// Handle Slip Upload if present
@@ -127,9 +133,41 @@ func ApproveExpense(c *fiber.Ctx) error {
 	expense.ApprovedBy = &userID
 	expense.ApprovedAt = &now
 
-	if err := database.DB.Save(&expense).Error; err != nil {
+	// Deduct from Approver's Wallet
+	var approver models.User
+	if err := database.DB.First(&approver, userID).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not find approver"})
+	}
+
+	approver.WalletBalance -= expense.Amount
+
+	tx := database.DB.Begin()
+	if err := tx.Save(&expense).Error; err != nil {
+		tx.Rollback()
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not approve expense"})
 	}
+
+	if err := tx.Save(&approver).Error; err != nil {
+		tx.Rollback()
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not update wallet balance"})
+	}
+
+	// Create Debit Transaction
+	transaction := models.WalletTransaction{
+		UserID:      userID,
+		Amount:      expense.Amount,
+		Type:        "debit",
+		Description: fmt.Sprintf("Approved expense: %s", expense.Title),
+		ReferenceID: expense.ID,
+		CreatedAt:   time.Now(),
+	}
+
+	if err := tx.Create(&transaction).Error; err != nil {
+		tx.Rollback()
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not create transaction record"})
+	}
+
+	tx.Commit()
 
 	return c.JSON(expense)
 }
@@ -154,18 +192,16 @@ func RejectExpense(c *fiber.Ctx) error {
 
 	// Verify permission
 	var role models.UserRole
-	if err := database.DB.Where("user_id = ? AND group_id = ? AND role IN ?", userID, expense.GroupID, []string{"approver", "admin"}).First(&role).Error; err != nil {
-		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not authorized to reject"})
+	// Check if user is in the group (any role)
+	if err := database.DB.Where("user_id = ? AND group_id = ?", userID, expense.GroupID).First(&role).Error; err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Not a member of this group"})
 	}
 
 	// Enforce Specific Approver if set
 	if expense.TargetUserID != nil {
-		fmt.Printf("DEBUG: Reject - TargetUserID: %d, CurrentUserID: %d\n", *expense.TargetUserID, userID)
 		if *expense.TargetUserID != userID {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Only the assigned approver can reject this expense"})
 		}
-	} else {
-		fmt.Println("DEBUG: Reject - TargetUserID is nil (Anyone)")
 	}
 
 	// Update Status

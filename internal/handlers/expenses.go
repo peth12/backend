@@ -61,9 +61,44 @@ func CreateExpense(c *fiber.Ctx) error {
 		ApprovedAt:   approvedAt,
 	}
 
-	if err := database.DB.Create(&expense).Error; err != nil {
+	tx := database.DB.Begin()
+
+	if err := tx.Create(&expense).Error; err != nil {
+		tx.Rollback()
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not create expense"})
 	}
+
+	if req.IsDirectRecord {
+		// Deduct from Creator's Wallet
+		var user models.User
+		if err := tx.First(&user, userID).Error; err != nil {
+			tx.Rollback()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "User not found"})
+		}
+
+		user.WalletBalance -= req.Amount
+		if err := tx.Save(&user).Error; err != nil {
+			tx.Rollback()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not update wallet balance"})
+		}
+
+		// Create Debit Transaction
+		transaction := models.WalletTransaction{
+			UserID:      userID,
+			Amount:      req.Amount,
+			Type:        "debit",
+			Description: fmt.Sprintf("Direct expense: %s", req.Title),
+			ReferenceID: expense.ID,
+			CreatedAt:   time.Now(),
+		}
+
+		if err := tx.Create(&transaction).Error; err != nil {
+			tx.Rollback()
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not create transaction record"})
+		}
+	}
+
+	tx.Commit()
 
 	return c.JSON(expense)
 }

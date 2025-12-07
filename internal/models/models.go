@@ -7,14 +7,15 @@ import (
 )
 
 type User struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	Email        string    `gorm:"unique;not null" json:"email"`
-	PasswordHash string    `gorm:"not null" json:"-"`
-	FullName     string    `gorm:"not null" json:"full_name"`
-	Phone        string    `json:"phone"`
-	AvatarURL    string    `json:"avatar_url"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	Email         string    `gorm:"unique;not null" json:"email"`
+	PasswordHash  string    `gorm:"not null" json:"-"`
+	FullName      string    `gorm:"not null" json:"full_name"`
+	Phone         string    `json:"phone"`
+	AvatarURL     string    `json:"avatar_url"`
+	WalletBalance float64   `gorm:"default:0" json:"wallet_balance"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type ExpenseGroup struct {
@@ -90,6 +91,16 @@ type ApprovalSlip struct {
 	UploadedAt time.Time `json:"uploaded_at"`
 }
 
+type WalletTransaction struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	UserID      uint      `gorm:"not null;index" json:"user_id"`
+	Amount      float64   `gorm:"not null" json:"amount"`
+	Type        string    `gorm:"not null" json:"type"` // credit, debit
+	Description string    `json:"description"`
+	ReferenceID uint      `json:"reference_id"` // E.g., ExpenseID
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 func Migrate(db *gorm.DB) {
 	db.AutoMigrate(
 		&User{},
@@ -99,5 +110,6 @@ func Migrate(db *gorm.DB) {
 		&ExpenseRequest{},
 		&ExpenseAttachment{},
 		&ApprovalSlip{},
+		&WalletTransaction{},
 	)
 }
