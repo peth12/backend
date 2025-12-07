@@ -29,13 +29,17 @@ func SetupRoutes(app *fiber.App) {
 	groups.Get("/", handlers.ListGroups)
 	groups.Post("/join", handlers.JoinGroup)
 	groups.Get("/:id", handlers.GetGroup)
+	groups.Put("/:id", handlers.UpdateGroup)
 	groups.Get("/:id/members", handlers.GetGroupMembers)
+	groups.Delete("/:id/members/:userId", handlers.RemoveMember)
 
 	// Expenses
 	expenses := api.Group("/expenses", middleware.Protected())
 	expenses.Post("/", handlers.CreateExpense)
 	expenses.Get("/", handlers.ListExpenses)
 	expenses.Get("/:id", handlers.GetExpense)
+	expenses.Get("/", handlers.ListExpenses)
+	expenses.Post("/", handlers.CreateExpense)
 
 	// Storage
 	storage := api.Group("/storage", middleware.Protected())

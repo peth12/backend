@@ -3,6 +3,7 @@ package handlers
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"strconv"
 	"time"
 
 	"spendwise-backend/internal/database"
@@ -184,4 +185,73 @@ func GetGroupMembers(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(result)
+}
+func UpdateGroup(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uint)
+	groupID := c.Params("id")
+
+	// Verify Admin/Owner Permission
+	var role models.UserRole
+	if err := database.DB.Where("group_id = ? AND user_id = ? AND role = 'admin'", groupID, userID).First(&role).Error; err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Only admins can update group details"})
+	}
+
+	type UpdateGroupRequest struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+
+	var req UpdateGroupRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+
+	var group models.ExpenseGroup
+	if err := database.DB.First(&group, groupID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Group not found"})
+	}
+
+	group.Name = req.Name
+	group.Description = req.Description
+
+	if err := database.DB.Save(&group).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not update group"})
+	}
+
+	return c.JSON(group)
+}
+
+func RemoveMember(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uint)
+	groupID := c.Params("id")
+	targetUserID := c.Params("userId") // ID of user to remove
+
+	// Verify Admin/Owner Permission
+	var adminRole models.UserRole
+	if err := database.DB.Where("group_id = ? AND user_id = ? AND role = 'admin'", groupID, userID).First(&adminRole).Error; err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Only admins can remove members"})
+	}
+
+	// Prevent removing self (use LeaveGroup for that)
+	if strconv.Itoa(int(userID)) == targetUserID {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot kick yourself"})
+	}
+
+	tx := database.DB.Begin()
+
+	// Remove from GroupMember
+	if err := tx.Where("group_id = ? AND user_id = ?", groupID, targetUserID).Delete(&models.GroupMember{}).Error; err != nil {
+		tx.Rollback()
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not remove member"})
+	}
+
+	// Remove from UserRole
+	if err := tx.Where("group_id = ? AND user_id = ?", groupID, targetUserID).Delete(&models.UserRole{}).Error; err != nil {
+		tx.Rollback()
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Could not remove member role"})
+	}
+
+	tx.Commit()
+
+	return c.JSON(fiber.Map{"message": "Member removed successfully"})
 }
